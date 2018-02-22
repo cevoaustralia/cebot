@@ -1,0 +1,12 @@
+version: '2'
+
+services:
+  cebot:
+    image: cebot
+    build: .
+    environment:
+      HUBOT_SLACK_TOKEN: xoxb-319658408742-KUlBpNUVWDNNrjQtzFNeWzv5
+      REDIS_URL: redis://brain:1313/
+  brain:
+    image: redis:alpine
+

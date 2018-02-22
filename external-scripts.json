@@ -1,0 +1,21 @@
+[
+    "hubot-bikeshed",
+    "hubot-cron",
+    "hubot-diagnostics",
+    "hubot-factoid",
+    "hubot-google-translate",
+    "hubot-help",
+    "hubot-maps",
+    "hubot-plusplus",
+    "hubot-pugme",
+    "hubot-redis-brain",
+    "hubot-rules",
+    "hubot-seriouslyguys",
+    "hubot-shipping-forecast",
+    "hubot-standup-alarm",
+    "hubot-thesimpsons",
+    "hubot-tell",
+    "hubot-thank-you",
+    "hubot-youtube",
+    "hubot-slack-vote"
+]

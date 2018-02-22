@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Cebot is a Hubot for Cevo
+
+Parameters:
+  InstanceType:
+    Type: String
+    Description: What sort of EC2 instance to use
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t2.small
+    Default: t2.nano
+  SSHKeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: SSH key for accessing the cebot instance
+    Default: cmp-cevo-dev-ap-southeast-2
+  CebotImage:
+    Type: String
+    Description: The Docker image to use for cebot
+    Default: cebot
+  CebotImageVersion:
+    Type: String
+    Description: Version tag of the Docker image to use for cebot
+    Default: 1.0.0
+  SlackToken:
+    Type: String
+    Description: The hubot slack token to use
+    NoEcho: true
+    Default: xoxb-319658408742-KUlBpNUVWDNNrjQtzFNeWzv5
+
+Mappings:
+  AccountMappings:
+    '590312749310':
+      VpcId: vpc-fc050f9e
+      SubnetA: subnet-cf2015bb
+      SubnetB: subnet-59aca43b
+      SubnetC: subnet-a9500fef
+
+Resources:
+  # --- Security groups ---
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cebot instance security group
+      VpcId: !FindInMap [ AccountMappings, !Ref 'AWS::AccountId', VpcId ]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0 # yeah everywhere
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CebotPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGet*
+                  - ecr:Describe*
+                  - ecr:Get*
+                  - ecr:ListImages
+                  - ecs:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:Create*
+                  - logs:Describe*
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref InstanceRole
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties: {}
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref Cluster
+      DesiredCount: 1
+      TaskDefinition: !Ref CebotTaskDefinition
+      DeploymentConfiguration: # do red-black deployments
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+
+  CebotTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Name: cebot
+          Essential: true
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${CebotImage}:${CebotImageVersion}
+          MemoryReservation: 128
+          Environment:
+            - Name: HUBOT_SLACK_TOKEN
+              Value: !Ref SlackToken
+            - Name: REDIS_URL
+              Value: !Sub redis://${Brain.RedisEndpoint.Address}:${Brain.RedisEndpoint.Port}/
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: cebot
+
+  LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true
+      ImageId: ami-36867d54 # current ECS image ID
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !Ref SSHKeyName
+      SecurityGroups:
+        - !Ref InstanceSecurityGroup
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          yum install -y aws-cli
+
+          # Set up ECS cluster
+          cat > /etc/ecs/ecs.config << EoConf
+          ECS_CLUSTER=${Cluster}
+          EoConf
+
+          # restart ECS to pick up the cluster config
+          stop ecs
+          start ecs
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !FindInMap [ AccountMappings, !Ref 'AWS::AccountId', SubnetA ]
+        - !FindInMap [ AccountMappings, !Ref 'AWS::AccountId', SubnetB ]
+        - !FindInMap [ AccountMappings, !Ref 'AWS::AccountId', SubnetC ]
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      MaxSize: 1
+      DesiredCapacity: 1
+      MinSize: 0
+      Tags:
+        - Key: Name
+          Value: cebot
+          PropagateAtLaunch: true
+
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Hubot Brain Group
+      SubnetIds:
+        - !FindInMap [ AccountMappings, !Ref 'AWS::AccountId', SubnetA ]
+        - !FindInMap [ AccountMappings, !Ref 'AWS::AccountId', SubnetB ]
+        - !FindInMap [ AccountMappings, !Ref 'AWS::AccountId', SubnetC ]
+
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Elasticache brain group
+      VpcId: !FindInMap [ AccountMappings, !Ref 'AWS::AccountId', VpcId ]
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  Brain:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      CacheNodeType:  cache.t2.micro
+      NumCacheNodes: 1
+      VpcSecurityGroupIds:
+        - !Ref CacheSecurityGroup
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      Engine: redis
