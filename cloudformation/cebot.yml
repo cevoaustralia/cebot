@@ -24,9 +24,8 @@ Parameters:
     Default: 1.0.0
   SlackToken:
     Type: String
-    Description: The hubot slack token to use
-    NoEcho: true
-    Default: xoxb-319658408742-KUlBpNUVWDNNrjQtzFNeWzv5
+    Description: The hubot slack token to use -- KMS encrypted
+    Default: AQECAHiibYyC1ISRUJR/3hUZ4tCW5PV4hYuIV5ywoHbIqpAiDgAAAIkwgYYGCSqGSIb3DQEHBqB5MHcCAQAwcgYJKoZIhvcNAQcBMB4GCWCGSAFlAwQBLjARBAxKULdBWhcWjYtSkoICARCARcCJ4SNd4MbETY86s/+YLjbBc3PWhnpYUHjBU/Pwgs7JgHYm72PBsFD/Xxpw1seRuhxrxgskT4g6+sB+W7gWGcHgVnw/+w==
 
 Mappings:
   AccountMappings:
@@ -37,6 +36,64 @@ Mappings:
       SubnetC: subnet-a9500fef
 
 Resources:
+  SlackSecret:
+    Type: Custom::SlackSecret
+    Properties:
+      ServiceToken: !GetAtt KMSDecryptor.Arn
+      Secret: !Ref SlackToken
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+            Action:
+            - sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                - kms:Decrypt
+                Resource: "*"
+
+  KMSDecryptor:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.6
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import base64
+          import cfnresponse
+
+          def lambda_handler(event, context):
+            if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+              blob = base64.b64decode(event['ResourceProperties']['Secret'])
+              kms = boto3.client('kms')
+              resp = kms.decrypt(CiphertextBlob=blob)
+              responsedata = {'Plaintext':resp['Plaintext'].decode(encoding='utf-8')}
+            else:
+              responsedata = {'Message':'Deleted'}
+
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responsedata)
+
   # --- Security groups ---
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -121,7 +178,7 @@ Resources:
           MemoryReservation: 128
           Environment:
             - Name: HUBOT_SLACK_TOKEN
-              Value: !Ref SlackToken
+              Value: !GetAtt SlackSecret.Plaintext
             - Name: REDIS_URL
               Value: !Sub redis://${Brain.RedisEndpoint.Address}:${Brain.RedisEndpoint.Port}/
           LogConfiguration:
