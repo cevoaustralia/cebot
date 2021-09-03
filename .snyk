@@ -1,0 +1,13 @@
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+version: v1.21.5
+ignore: {}
+# patches apply the minimum changes required to fix a vulnerability
+patch:
+  'npm:debug:20170905':
+    - hubot > express > connect > connect-timeout > debug:
+        patched: '2021-09-03T07:35:08.399Z'
+  'npm:ms:20170412':
+    - hubot > express > connect > connect-timeout > ms:
+        patched: '2021-09-03T07:35:08.399Z'
+    - hubot > express > connect > connect-timeout > debug > ms:
+        patched: '2021-09-03T07:35:08.399Z'
