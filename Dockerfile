@@ -1,4 +1,4 @@
-FROM alpine:3.12.7
+FROM alpine:3.13.7
 MAINTAINER Colin Panisset, colin.panisset@cevo.com.au
 
 ENV BOTDIR /bot
