@@ -26,7 +26,7 @@
     "hubot-scripts": "^2.5.16",
     "hubot-seriouslyguys": "*",
     "hubot-shipping-forecast": "*",
-    "hubot-slack": "^3.2.1",
+    "hubot-slack": "^4.0.0",
     "hubot-slack-vote": "*",
     "hubot-standup-alarm": "*",
     "hubot-tell": "*",
